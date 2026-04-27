@@ -79,7 +79,7 @@ type CustomerData = {
   notes: string;
 };
 
-const OWNER_WHATSAPP = "5583999999999"; // Troque pelo WhatsApp do dono do site. Ex: 5583999999999
+const OWNER_WHATSAPP = "5583996823375"; // Troque pelo WhatsApp do dono do site. Ex: 5583999999999
 
 function formatProductCode(value: number) {
   return `#${String(value).padStart(4, "0")}`;
