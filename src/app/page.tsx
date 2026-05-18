@@ -1,256 +1,344 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { parseCookies } from "nookies";
-import { useQuery } from "@tanstack/react-query";
-import { CgProfile } from "react-icons/cg";
-import { IoHomeSharp } from "react-icons/io5";
-import { FiArrowRight } from "react-icons/fi";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getProduct, getBanner } from "@/hooks/useClient";
-import { PropsProduct } from "@/types/product";
-import { PropsBanner } from "@/types/banner";
-import { WhatsAppFloatingButton } from "@/components/WhatsAppFloatingButton";
-import PageLoading from "@/components/PageLoading/page";
-import { Footer } from "@/components/ContactFooter";
+const TIME_OPTIONS = [
+  { label: "1 minuto", value: 60 },
+  { label: "2 minutos", value: 120 },
+  { label: "3 minutos", value: 180 },
+  { label: "5 minutos", value: 300 },
+  { label: "10 minutos", value: 600 },
+];
 
-export default function Home() {
-  const router = useRouter();
+export default function EnviosWhatsappPage() {
+  const [contactsText, setContactsText] = useState("");
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [waitSeconds, setWaitSeconds] = useState(180);
+  const [secondsLeft, setSecondsLeft] = useState(180);
+  const [running, setRunning] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [waitingConfirmation, setWaitingConfirmation] = useState(false);
+  const [openedContacts, setOpenedContacts] = useState<string[]>([]);
 
-  const [credentialVerifier, setCredentialVerifier] = useState(false);
-  const [pageLoading, setPageLoading] = useState(false);
-  const [currentBanner, setCurrentBanner] = useState(0);
+  const whatsappWindow = useRef<Window | null>(null);
 
-  const { "nextauth.token": tokenParse } = parseCookies();
-  const { "nextauth.userId": tokenUserId } = parseCookies();
+  const contacts = useMemo(() => {
+    const cleanContacts = contactsText
+      .split("\n")
+      .map((item) => item.replace(/\D/g, "").trim())
+      .filter((item) => item.length >= 10);
 
-  const { data: dataProduct, isLoading: isLoadingProducts } = useQuery<
-    PropsProduct[]
-  >({
-    queryKey: ["Product"],
-    queryFn: getProduct,
-  });
+    return Array.from(new Set(cleanContacts));
+  }, [contactsText]);
 
-  const { data: dataBanner = [], isLoading: isLoadingBanner } = useQuery<
-    PropsBanner[]
-  >({
-    queryKey: ["Banner"],
-    queryFn: getBanner,
-  });
+  const duplicatedCount = useMemo(() => {
+    const cleanContacts = contactsText
+      .split("\n")
+      .map((item) => item.replace(/\D/g, "").trim())
+      .filter((item) => item.length >= 10);
 
-  useEffect(() => {
-    setCredentialVerifier(Boolean(tokenParse && tokenUserId));
-  }, [tokenParse, tokenUserId]);
+    return cleanContacts.length - new Set(cleanContacts).size;
+  }, [contactsText]);
 
-  useEffect(() => {
-    if (dataBanner.length <= 1) return;
+  const currentContact = contacts[currentIndex];
+  const progress =
+    contacts.length > 0 ? Math.round((openedContacts.length / contacts.length) * 100) : 0;
 
-    const interval = setInterval(() => {
-      setCurrentBanner((prev) =>
-        prev === dataBanner.length - 1 ? 0 : prev + 1,
-      );
-    }, 4500);
+  function playSound() {
+    const audio = new Audio(
+      "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
+    );
+    audio.play().catch(() => {});
+  }
 
-    return () => clearInterval(interval);
-  }, [dataBanner]);
+  function formatPhone(phone: string) {
+    if (phone.startsWith("55")) return phone;
+    return `55${phone}`;
+  }
 
-  const handleNavigateProfile = () => {
-    setPageLoading(true);
+  function openWhatsapp(phone: string) {
+    const finalPhone = formatPhone(phone);
+    const url = `https://wa.me/${finalPhone}`;
 
-    if (credentialVerifier && tokenUserId) {
-      router.push(`/dashboard/admin/${tokenUserId}`);
+    if (!whatsappWindow.current || whatsappWindow.current.closed) {
+      whatsappWindow.current = window.open(url, "whatsapp_leads");
     } else {
-      router.push("/auth");
+      whatsappWindow.current.location.href = url;
+      whatsappWindow.current.focus();
     }
-  };
 
-  const handleNavigateCatalog = () => {
-    setPageLoading(true);
-    router.push("/catalog");
-  };
+    setOpenedContacts((prev) =>
+      prev.includes(phone) ? prev : [...prev, phone]
+    );
+  }
 
-  const productsRandom = useMemo(() => {
-    if (!dataProduct) return [];
-    return [...dataProduct].sort(() => Math.random() - 0.5).slice(0, 7);
-  }, [dataProduct]);
+  function startSending() {
+    if (!contacts.length) {
+      alert("Informe pelo menos um contato válido.");
+      return;
+    }
 
-  const featuredProduct = productsRandom[0];
-  const secondaryProducts = productsRandom.slice(1, 7);
+    setStarted(true);
+    setRunning(false);
+    setWaitingConfirmation(true);
+    setCurrentIndex(0);
+    setSecondsLeft(waitSeconds);
+    setOpenedContacts([]);
+    playSound();
+  }
+
+  function confirmOpenContact() {
+    if (!currentContact) return;
+
+    openWhatsapp(currentContact);
+    setWaitingConfirmation(false);
+    setRunning(true);
+    setSecondsLeft(waitSeconds);
+  }
+
+  function pauseSending() {
+    setRunning(false);
+  }
+
+  function continueSending() {
+    setRunning(true);
+  }
+
+  function resetSending() {
+    setRunning(false);
+    setStarted(false);
+    setWaitingConfirmation(false);
+    setCurrentIndex(0);
+    setSecondsLeft(waitSeconds);
+    setOpenedContacts([]);
+  }
+
+  function prepareNextContact() {
+    const nextIndex = currentIndex + 1;
+
+    if (nextIndex >= contacts.length) {
+      setRunning(false);
+      setStarted(false);
+      setWaitingConfirmation(false);
+      playSound();
+      alert("Todos os contatos da lista foram abertos.");
+      return;
+    }
+
+    setCurrentIndex(nextIndex);
+    setRunning(false);
+    setWaitingConfirmation(true);
+    setSecondsLeft(waitSeconds);
+    playSound();
+  }
+
+  useEffect(() => {
+    setSecondsLeft(waitSeconds);
+  }, [waitSeconds]);
+
+  useEffect(() => {
+    if (!running || !started || waitingConfirmation) return;
+
+    const timer = setInterval(() => {
+      setSecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setTimeout(prepareNextContact, 300);
+          return waitSeconds;
+        }
+
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [running, started, waitingConfirmation, currentIndex, contacts, waitSeconds]);
+
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = secondsLeft % 60;
 
   return (
-    <main className="min-h-screen bg-[#fffaf5] text-neutral-900">
-      {/* HEADER */}
-      <header className="sticky top-0 z-50 border-b border-orange-100 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex h-[74px] w-full max-w-7xl items-center justify-between px-4 sm:h-[84px] sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <img
-              src="https://res.cloudinary.com/dz46wt0iy/image/upload/v1775007158/ChatGPT_Image_31_de_mar._de_2026_22_31_37_rekjvh.png"
-              alt="Logo da loja"
-              className="h-[85px] w-auto object-contain sm:h-[90px] lg:h-[90px]"
-            />
-          </div>
-
-          <button
-            onClick={handleNavigateProfile}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-orange-200 bg-white text-[1.25rem] text-orange-500 transition-all duration-300 hover:bg-orange-50 hover:shadow-md"
-          >
-            {credentialVerifier ? <IoHomeSharp /> : <CgProfile />}
-          </button>
-        </div>
-      </header>
-
-      {/* 🔥 BANNER AJUSTADO */}
-      <section className="w-full py-0 sm:px-6 sm:py-6 lg:px-8">
-        <div className="w-full max-w-7xl mx-auto">
-          <div className="overflow-hidden sm:border sm:border-orange-100 sm:bg-white sm:shadow-[0_22px_60px_rgba(249,115,22,0.08)]">
-            <div className="relative h-[220px] w-full sm:h-[360px] lg:h-[520px]">
-              {isLoadingBanner ? (
-                <div className="h-full w-full animate-pulse bg-neutral-200" />
-              ) : dataBanner.length > 0 ? (
-                <>
-                  {dataBanner.map((banner, index) => (
-                    <div
-                      key={banner._id}
-                      className={`absolute inset-0 transition-all duration-700 ${
-                        index === currentBanner
-                          ? "z-10 scale-100 opacity-100"
-                          : "z-0 scale-[1.015] opacity-0"
-                      }`}
-                    >
-                      <div
-                        className="absolute inset-0 bg-cover bg-center"
-                        style={{ backgroundImage: `url(${banner.image.url})` }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
-                    </div>
-                  ))}
-
-                  {dataBanner.length > 1 && (
-                    <div className="absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/70 px-3 py-2 backdrop-blur-md">
-                      {dataBanner.map((_, index) => (
-                        <span
-                          key={index}
-                          className={`h-[7px] rounded-full transition-all duration-300 ${
-                            index === currentBanner
-                              ? "w-7 bg-orange-500"
-                              : "w-2 bg-orange-200"
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="flex h-full items-center justify-center bg-neutral-100 text-neutral-500">
-                  Nenhum banner disponível
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* PRODUTOS */}
-      <section className="mx-auto w-full max-w-7xl px-4 pb-4 pt-4 sm:px-6 sm:pt-6 lg:px-8">
-        <div className="rounded-[22px] border border-orange-100 bg-white p-4 shadow-sm sm:rounded-[30px] sm:p-7">
-          <span className="inline-flex rounded-full bg-orange-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-orange-600 sm:text-xs">
-            Nova coleção
-          </span>
-
-          <h1 className="mt-3 text-lg font-bold leading-tight text-neutral-900 sm:mt-4 sm:text-3xl">
-            Preço baixo e qualidade é aqui — a vitrine perfeita para destacar
-            seus produtos.
-          </h1>
-
-          <p className="mt-3 text-sm leading-6 text-neutral-600 sm:mt-4 sm:text-base sm:leading-7">
-            Preço baixo e qualidade que se destacam em uma vitrine moderna, com
-            melhor leitura no celular e uma apresentação que valoriza cada
-            produto de forma mais profissional.
+    <main className="min-h-screen bg-[#050505] px-4 py-8 text-white">
+      <section className="mx-auto max-w-6xl">
+        <div className="mb-6 rounded-[2rem] border border-white/10 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6 shadow-2xl">
+          <p className="mb-2 text-sm font-bold uppercase tracking-[0.3em] text-green-400">
+            Automação manual
           </p>
 
-          <button
-            onClick={handleNavigateCatalog}
-            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-[20px] font-semibold text-white transition-all duration-300 hover:bg-orange-600 hover:shadow-lg sm:mt-7 sm:w-auto sm:rounded-2xl sm:px-5 sm:py-3.5"
-          >
-            Explorar catálogo
-            <FiArrowRight />
-          </button>
+          <h1 className="text-3xl font-black md:text-5xl">
+            Envio de Leads pelo WhatsApp
+          </h1>
+
+          <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-400 md:text-base">
+            Cole sua lista de contatos, escolha o intervalo e abra um lead por vez
+            com confirmação manual. O sistema remove duplicados automaticamente.
+          </p>
+        </div>
+
+        <div className="mb-6 grid gap-4 md:grid-cols-4">
+          <Card title="Leads válidos" value={contacts.length} />
+          <Card title="Já abertos" value={openedContacts.length} />
+          <Card title="Duplicados removidos" value={duplicatedCount} />
+          <Card title="Progresso" value={`${progress}%`} />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-[2rem] border border-white/10 bg-zinc-900/80 p-5 shadow-xl">
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <label className="block text-sm font-black text-white">
+                  Lista de contatos
+                </label>
+                <p className="text-xs text-zinc-500">
+                  Um número por linha. Duplicados são ignorados.
+                </p>
+              </div>
+
+              <select
+                value={waitSeconds}
+                onChange={(e) => setWaitSeconds(Number(e.target.value))}
+                disabled={started}
+                className="h-11 rounded-2xl border border-white/10 bg-zinc-950 px-4 text-sm font-bold text-white outline-none"
+              >
+                {TIME_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    Intervalo: {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <textarea
+              value={contactsText}
+              onChange={(e) => setContactsText(e.target.value)}
+              disabled={started}
+              className="h-[420px] w-full resize-none rounded-3xl border border-white/10 bg-zinc-950 p-5 text-sm leading-7 text-white outline-none transition placeholder:text-zinc-700 focus:border-green-500"
+            />
+
+            <div className="mt-4 rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm leading-6 text-yellow-100">
+              Use apenas contatos que você tem permissão para abordar. Essa tela
+              não envia mensagem automática, apenas abre a conversa do WhatsApp.
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-white/10 bg-zinc-900/80 p-5 shadow-xl">
+            <div className="rounded-3xl border border-green-500/20 bg-green-500/10 p-5 text-center">
+              <p className="text-sm font-bold text-green-300">
+                {waitingConfirmation ? "Contato pronto para abrir" : "Próximo contato em"}
+              </p>
+
+              <strong className="mt-3 block text-5xl font-black text-green-400">
+                {waitingConfirmation
+                  ? "PRONTO"
+                  : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`}
+              </strong>
+
+              <p className="mt-3 text-sm text-zinc-300">
+                {currentContact || "Nenhum contato selecionado"}
+              </p>
+            </div>
+
+            <div className="mt-5 h-3 overflow-hidden rounded-full bg-zinc-950">
+              <div
+                className="h-full rounded-full bg-green-500 transition-all"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <Info label="Status" value={getStatus(running, started, waitingConfirmation)} />
+              <Info label="Contato atual" value={contacts.length ? currentIndex + 1 : 0} />
+              <Info label="Total da lista" value={contacts.length} />
+              <Info label="Intervalo" value={`${waitSeconds / 60} min`} />
+            </div>
+
+            <div className="mt-6 grid gap-3">
+              {!started && (
+                <button
+                  onClick={startSending}
+                  className="h-12 rounded-2xl bg-green-600 font-black text-white transition hover:bg-green-500"
+                >
+                  Iniciar
+                </button>
+              )}
+
+              {waitingConfirmation && started && (
+                <button
+                  onClick={confirmOpenContact}
+                  className="h-12 rounded-2xl bg-green-600 font-black text-white transition hover:bg-green-500"
+                >
+                  Abrir contato no WhatsApp
+                </button>
+              )}
+
+              {started && running && (
+                <button
+                  onClick={pauseSending}
+                  className="h-12 rounded-2xl bg-yellow-500 font-black text-zinc-950 transition hover:bg-yellow-400"
+                >
+                  Pausar contador
+                </button>
+              )}
+
+              {started && !running && !waitingConfirmation && (
+                <button
+                  onClick={continueSending}
+                  className="h-12 rounded-2xl bg-blue-600 font-black text-white transition hover:bg-blue-500"
+                >
+                  Continuar contador
+                </button>
+              )}
+
+              {started && (
+                <button
+                  onClick={prepareNextContact}
+                  className="h-12 rounded-2xl border border-white/10 bg-white/5 font-black text-white transition hover:bg-white/10"
+                >
+                  Pular para próximo
+                </button>
+              )}
+
+              <button
+                onClick={resetSending}
+                className="h-12 rounded-2xl border border-red-500/20 bg-red-500/10 font-black text-red-200 transition hover:bg-red-500/20"
+              >
+                Resetar
+              </button>
+            </div>
+          </div>
         </div>
       </section>
-
-      <section className="mx-auto w-full max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
-        {isLoadingProducts ? (
-          <div className="mt-10 text-center text-neutral-500">
-            Carregando produtos...
-          </div>
-        ) : (
-          <>
-            {featuredProduct && (
-              <div className="mt-8">
-                <div
-                  onClick={() => router.push(`/catalog/${featuredProduct._id}`)}
-                  className="relative cursor-pointer overflow-hidden rounded-[28px] bg-white shadow-md transition hover:shadow-lg"
-                >
-                  <div className="relative h-[300px] w-full sm:h-[420px] lg:h-[520px]">
-                    <Image
-                      src={featuredProduct.image.url}
-                      alt={featuredProduct.name}
-                      fill
-                      className="object-cover"
-                    />
-                  </div>
-
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-6 text-white">
-                    <h3 className="text-xl font-bold sm:text-2xl">
-                      {featuredProduct.name}
-                    </h3>
-
-                    <span className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-orange-300">
-                      Ver detalhes <FiArrowRight />
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-3">
-              {secondaryProducts.map((product) => (
-                <div
-                  key={product._id}
-                  onClick={() => router.push(`/catalog/${product._id}`)}
-                  className="cursor-pointer overflow-hidden rounded-2xl bg-white shadow-sm transition hover:shadow-md"
-                >
-                  <div className="relative h-[160px] w-full sm:h-[200px]">
-                    <Image
-                      src={product.image.url}
-                      alt={product.name}
-                      fill
-                      className="object-cover"
-                    />
-                  </div>
-
-                  <div className="p-3">
-                    <h4 className="line-clamp-2 text-sm font-semibold text-neutral-800">
-                      {product.name}
-                    </h4>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </section>
-
-      <WhatsAppFloatingButton
-        phone="5583998033753"
-        message="Olá! Vim pelo site e gostaria de saber mais."
-      />
-
-      <PageLoading visible={pageLoading} />
-
-      <Footer />
     </main>
   );
+}
+
+function Card({ title, value }: { title: string; value: string | number }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-zinc-900 p-5 shadow-xl">
+      <p className="text-sm font-medium text-zinc-400">{title}</p>
+      <strong className="mt-2 block text-3xl font-black text-white">
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-950 px-4 py-3 text-sm">
+      <span className="text-zinc-400">{label}</span>
+      <strong className="text-white">{value}</strong>
+    </div>
+  );
+}
+
+function getStatus(
+  running: boolean,
+  started: boolean,
+  waitingConfirmation: boolean
+) {
+  if (!started) return "Parado";
+  if (waitingConfirmation) return "Aguardando confirmação";
+  if (running) return "Contando";
+  return "Pausado";
 }
