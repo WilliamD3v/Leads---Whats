@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+const STORAGE_KEY = "whatsapp-leads-storage";
+const PROGRESS_KEY = "whatsapp-leads-progress";
+
 const TIME_OPTIONS = [
   { label: "1 minuto", value: 60 },
   { label: "2 minutos", value: 120 },
@@ -19,8 +22,59 @@ export default function EnviosWhatsappPage() {
   const [started, setStarted] = useState(false);
   const [waitingConfirmation, setWaitingConfirmation] = useState(false);
   const [openedContacts, setOpenedContacts] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   const whatsappWindow = useRef<Window | null>(null);
+
+  useEffect(() => {
+    const savedContacts = localStorage.getItem(STORAGE_KEY);
+    const savedProgress = localStorage.getItem(PROGRESS_KEY);
+
+    if (savedContacts) setContactsText(savedContacts);
+
+    if (savedProgress) {
+      const progress = JSON.parse(savedProgress);
+
+      setCurrentIndex(progress.currentIndex || 0);
+      setWaitSeconds(progress.waitSeconds || 180);
+      setSecondsLeft(progress.secondsLeft || progress.waitSeconds || 180);
+      setStarted(progress.started || false);
+      setRunning(false);
+      setWaitingConfirmation(progress.waitingConfirmation || false);
+      setOpenedContacts(progress.openedContacts || []);
+    }
+
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    localStorage.setItem(STORAGE_KEY, contactsText);
+  }, [contactsText, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+
+    localStorage.setItem(
+      PROGRESS_KEY,
+      JSON.stringify({
+        currentIndex,
+        waitSeconds,
+        secondsLeft,
+        started,
+        waitingConfirmation,
+        openedContacts,
+      })
+    );
+  }, [
+    currentIndex,
+    waitSeconds,
+    secondsLeft,
+    started,
+    waitingConfirmation,
+    openedContacts,
+    loaded,
+  ]);
 
   const contacts = useMemo(() => {
     const cleanContacts = contactsText
@@ -41,13 +95,17 @@ export default function EnviosWhatsappPage() {
   }, [contactsText]);
 
   const currentContact = contacts[currentIndex];
+
   const progress =
-    contacts.length > 0 ? Math.round((openedContacts.length / contacts.length) * 100) : 0;
+    contacts.length > 0
+      ? Math.round((openedContacts.length / contacts.length) * 100)
+      : 0;
 
   function playSound() {
     const audio = new Audio(
       "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
     );
+
     audio.play().catch(() => {});
   }
 
@@ -105,12 +163,33 @@ export default function EnviosWhatsappPage() {
   }
 
   function resetSending() {
+    localStorage.removeItem(PROGRESS_KEY);
+
     setRunning(false);
     setStarted(false);
     setWaitingConfirmation(false);
     setCurrentIndex(0);
     setSecondsLeft(waitSeconds);
     setOpenedContacts([]);
+  }
+
+  function renewContacts() {
+    const confirmAction = confirm(
+      "Deseja realmente renovar os contatos? Todos os contatos salvos e o progresso serão apagados."
+    );
+
+    if (!confirmAction) return;
+
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(PROGRESS_KEY);
+
+    setContactsText("");
+    setCurrentIndex(0);
+    setOpenedContacts([]);
+    setStarted(false);
+    setRunning(false);
+    setWaitingConfirmation(false);
+    setSecondsLeft(waitSeconds);
   }
 
   function prepareNextContact() {
@@ -133,8 +212,10 @@ export default function EnviosWhatsappPage() {
   }
 
   useEffect(() => {
-    setSecondsLeft(waitSeconds);
-  }, [waitSeconds]);
+    if (!started) {
+      setSecondsLeft(waitSeconds);
+    }
+  }, [waitSeconds, started]);
 
   useEffect(() => {
     if (!running || !started || waitingConfirmation) return;
@@ -152,7 +233,14 @@ export default function EnviosWhatsappPage() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [running, started, waitingConfirmation, currentIndex, contacts, waitSeconds]);
+  }, [
+    running,
+    started,
+    waitingConfirmation,
+    currentIndex,
+    contacts,
+    waitSeconds,
+  ]);
 
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = secondsLeft % 60;
@@ -170,8 +258,8 @@ export default function EnviosWhatsappPage() {
           </h1>
 
           <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-400 md:text-base">
-            Cole sua lista de contatos, escolha o intervalo e abra um lead por vez
-            com confirmação manual. O sistema remove duplicados automaticamente.
+            Os contatos e o progresso ficam salvos no navegador. Se atualizar a
+            página, o sistema volta no mesmo contato em que parou.
           </p>
         </div>
 
@@ -190,7 +278,7 @@ export default function EnviosWhatsappPage() {
                   Lista de contatos
                 </label>
                 <p className="text-xs text-zinc-500">
-                  Um número por linha. Duplicados são ignorados.
+                  Um número por linha. Os contatos ficam salvos.
                 </p>
               </div>
 
@@ -224,13 +312,17 @@ export default function EnviosWhatsappPage() {
           <div className="rounded-[2rem] border border-white/10 bg-zinc-900/80 p-5 shadow-xl">
             <div className="rounded-3xl border border-green-500/20 bg-green-500/10 p-5 text-center">
               <p className="text-sm font-bold text-green-300">
-                {waitingConfirmation ? "Contato pronto para abrir" : "Próximo contato em"}
+                {waitingConfirmation
+                  ? "Contato pronto para abrir"
+                  : "Próximo contato em"}
               </p>
 
               <strong className="mt-3 block text-5xl font-black text-green-400">
                 {waitingConfirmation
                   ? "PRONTO"
-                  : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`}
+                  : `${String(minutes).padStart(2, "0")}:${String(
+                      seconds
+                    ).padStart(2, "0")}`}
               </strong>
 
               <p className="mt-3 text-sm text-zinc-300">
@@ -246,8 +338,14 @@ export default function EnviosWhatsappPage() {
             </div>
 
             <div className="mt-5 space-y-3">
-              <Info label="Status" value={getStatus(running, started, waitingConfirmation)} />
-              <Info label="Contato atual" value={contacts.length ? currentIndex + 1 : 0} />
+              <Info
+                label="Status"
+                value={getStatus(running, started, waitingConfirmation)}
+              />
+              <Info
+                label="Contato atual"
+                value={contacts.length ? currentIndex + 1 : 0}
+              />
               <Info label="Total da lista" value={contacts.length} />
               <Info label="Intervalo" value={`${waitSeconds / 60} min`} />
             </div>
@@ -258,7 +356,7 @@ export default function EnviosWhatsappPage() {
                   onClick={startSending}
                   className="h-12 rounded-2xl bg-green-600 font-black text-white transition hover:bg-green-500"
                 >
-                  Iniciar
+                  Iniciar do começo
                 </button>
               )}
 
@@ -302,7 +400,14 @@ export default function EnviosWhatsappPage() {
                 onClick={resetSending}
                 className="h-12 rounded-2xl border border-red-500/20 bg-red-500/10 font-black text-red-200 transition hover:bg-red-500/20"
               >
-                Resetar
+                Resetar progresso
+              </button>
+
+              <button
+                onClick={renewContacts}
+                className="h-12 rounded-2xl border border-orange-500/20 bg-orange-500/10 font-black text-orange-200 transition hover:bg-orange-500/20"
+              >
+                Renovar contatos
               </button>
             </div>
           </div>
@@ -323,7 +428,7 @@ function Card({ title, value }: { title: string; value: string | number }) {
   );
 }
 
-function Info({ label, value }: { label: string; value: string | number }) {
+function Info({ label, value }: { label: string | number; value: string | number }) {
   return (
     <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-950 px-4 py-3 text-sm">
       <span className="text-zinc-400">{label}</span>
